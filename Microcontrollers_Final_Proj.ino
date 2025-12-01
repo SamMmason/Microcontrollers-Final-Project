@@ -1,3 +1,12 @@
+/*
+Owen Schulz
+Microcontrollers
+12-1-2025
+
+Project: F.R.E.D. (Fire Retarding Experimental Device)
+*/
+
+
 #include <IRremote.h>
 #include <Servo.h>
 
@@ -6,14 +15,20 @@ const int echoPin = 13;
 const int trigPin = 12;
 const int servoPin = 9;
 const int heatpin = A2;
+const int pumpin = 8;
+const int axe = 9;
+const int spraydist = 20;//In centimeters
 
+//Changes throughout code
 int Speed = 90;
 
 const unsigned long Forward = 0xB946FF00;
 const unsigned long Kill = 0xBF40FF00;
 
 Servo scanningServo;
+Servo AXEServo;
 
+//Declare pinmodes and initiate systems
 void setup() {
   Serial.begin(9600);
   IrReceiver.begin(ReadPin, ENABLE_LED_FEEDBACK);
@@ -22,12 +37,15 @@ void setup() {
   pinMode(4, OUTPUT);
   pinMode(5, OUTPUT);
   pinMode(6, OUTPUT);
+  pinMode(pumpin, OUTPUT);
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
   scanningServo.attach(servoPin);
+  AXEServo.attach(axe);
 }
 
+//
 float ultrasonic_read() {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
@@ -39,6 +57,31 @@ float ultrasonic_read() {
   return d;
 }
 
+//FRED likes to spread the ashes when he's finished putting the fire out (just to be safe)
+void AXEIT(){
+  AXEServo.write(0);
+  delay(100);
+  AXEServo.write(90);
+  delay(400);
+  AXEServo.write(0);
+  delay(100);
+  MotorControl('R');
+  delay(300);
+  MotorControl('L');
+  delay(300);
+  MotorControl('R');
+  delay(300);
+  MotorControl('L');
+  delay(300);
+  AXEServo.write(90);
+  delay(400);
+  AXEServo.write(0);
+  delay(100);
+  AXEServo.write(90);
+  delay(400);
+}
+
+//Motor Control commands for FRED's movement
 void MotorControl(char direc) {
   switch (direc) {
     case 'F':
@@ -76,6 +119,7 @@ void MotorControl(char direc) {
   }
 }
 
+//IR Remote Handling
 char remoteDecoder(unsigned long rawdata) {
   switch (rawdata) {
     case Forward: return 'U';
@@ -84,11 +128,15 @@ char remoteDecoder(unsigned long rawdata) {
   }
 }
 
+//Spraying Water Function
 void spray(){
-
+  digitalWrite(pumpin, HIGH);
+  delay(1000);
+  digitalWrite(pumpin, LOW);
 }
 
-void acquireTargetAndChase() {
+//Chasing Fire (SO brave of FRED)
+float ChaseFire() {
 
   float closestDist = 9999;
   int bestAngle = 90;
@@ -137,6 +185,67 @@ void acquireTargetAndChase() {
   MotorControl('F');
   delay(600);
   MotorControl('K');
+
+  return closestDist;
+}
+
+//Aim FRED at the fire
+void aimFred(){
+  bool centered = false;
+  while(centered = false){
+    static float closestDist = 9999;
+    static int bestAngle = 90;
+
+    // scan entire arc
+    for (int i = 0; i <= 180; i += 15) {
+      scanningServo.write(i);
+      if(i == 0){
+      delay(500);
+      }
+      delay(200);
+      float d = 0;
+      for (int k = 0; k < 3; k++) d += analogRead(heatpin);
+      d /= 3.0;
+      if (d > 2 && d < closestDist) {
+          closestDist = d;
+          bestAngle = i;
+        }
+      }
+    if(bestAngle = 0) centered = true;
+    Serial.print("BEST ANGLE = ");
+    Serial.println(bestAngle);
+    Serial.print("DIST = ");
+    Serial.println(closestDist);
+
+    // turn toward it
+    int angleOffset = 90 - bestAngle;
+
+    // positive offset = right
+    // negative offset = left
+    Speed = 80;
+    if (angleOffset > 8) {
+      MotorControl('R');
+      delay(abs(angleOffset) * 4);
+      Serial.println("Right");
+    } else if (angleOffset < -8) {
+        MotorControl('L');
+        delay(abs(angleOffset) * 4);
+        Serial.println("left");
+        }
+    MotorControl('K');
+
+  }
+}
+
+
+//When should FRED put out the fire?
+void ThinkFREDThink(){
+  float dist = ChaseFire();
+  if(dist < spraydist){
+    aimFred();
+    spray();
+    AXEIT();
+  }
 }
 
 bool autoMode = false;
@@ -159,6 +268,6 @@ void loop() {
   }
 
   if (autoMode) {
-    acquireTargetAndChase(); // run hunt loop repeatedly
+   ThinkFREDThink();// run hunt loop repeatedly
   }
 }
