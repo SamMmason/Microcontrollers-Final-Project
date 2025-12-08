@@ -14,10 +14,9 @@ const int echoPin = 13;
 const int trigPin = 12;
 const int servoPin = 9;
 const int heatpin = A2;
-const int pumpin = 10; //Runs a relay that drives the WaterPump
-const int axe = A1;      
-const int spraydist = 20; // In centimeters
-bool hasSprayed = false;   
+const int pumpin = 10;
+const int axe = A1;         
+const int sprayHeat = 150;    // In whatever the IR sensor reads
 
 // Changes throughout code
 int Speed = 90;
@@ -41,11 +40,9 @@ void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
-  digitalWrite(pumpin, LOW);
   scanningServo.attach(servoPin);
   AXEServo.attach(axe);
-  AXEServo.write(90);
-  delay(1000);
+  AXEServo.write(80);
 }
 
 // Ultrasonic distance in cm
@@ -63,28 +60,33 @@ float ultrasonic_read() {
 
 // FRED likes to spread the ashes when he's finished putting the fire out (just to be safe)
 void AXEIT() {
-  AXEServo.write(180);
-  delay(100);
-  AXEServo.write(90);
-  delay(400);
-  AXEServo.write(180);
-  delay(100);
+  float read = ultrasonic_read();
+  if (read < 20){
 
-  MotorControl('R');
-  delay(300);
-  MotorControl('L');
-  delay(300);
-  MotorControl('R');
-  delay(300);
-  MotorControl('L');
-  delay(300);
+    AXEServo.write(180);
+    delay(1500);
+    AXEServo.write(80);
+    delay(1500);
+    AXEServo.write(180);
+    delay(1500);
 
-  AXEServo.write(90);
-  delay(400);
-  AXEServo.write(180);
-  delay(100);
-  AXEServo.write(90);
-  delay(400);
+    MotorControl('R');
+    delay(500);
+    MotorControl('L');
+    delay(500);
+    MotorControl('R');
+    delay(500);
+    MotorControl('L');
+    delay(500);
+    MotorControl('K');
+
+    AXEServo.write(80);
+    delay(1500);
+    AXEServo.write(180);
+    delay(1500);
+    AXEServo.write(80);
+    delay(1500);
+  }
 }
 
 // Motor Control commands for FRED's movement
@@ -136,180 +138,130 @@ char remoteDecoder(unsigned long rawdata) {
 
 // Spraying Water Function
 void spray() {
+  AXEServo.write(180);
+  delay(1500);
   digitalWrite(pumpin, HIGH);
   delay(5000);
   digitalWrite(pumpin, LOW);
   delay(500);
+  AXEServo.write(80);
+  delay(1500);
 }
 
-// Chasing Fire (SO brave of FRED)
+// Scan for fire: find angle of maximum heat reading
+void scanForFire(int &bestAngle, float &bestReading) {
+  bestReading = 9999;      // "no fire yet"
+  bestAngle   = 90;        // default straight ahead
 
-// Tune this after you look at Serial prints:
-const int FIRE_THRESHOLD = 850;   // example; you MUST tune this
-float ChaseFire() {
-  // --------- Coarse scan ----------
-  int bestAngle = 90;
-  float bestReading = 1023.0;    // max ADC
-  float worstReading = 0.0;
+  float d;
 
+  // scan entire arc 0° → 180° in 15° steps
   for (int i = 0; i <= 180; i += 15) {
     scanningServo.write(i);
+
+    // give servo time to move before reading
     if (i == 0) {
-      delay(500);                // first move settle
+      delay(500);
+    } else {
+      delay(200);
     }
-    delay(200);                  // sensor settle
 
-    float d = 0;
-    const int N = 7;             // more averaging
-    for (int k = 0; k < N; k++) {
+    // average 3 readings at this angle
+    d = 0;
+    for (int k = 0; k < 3; k++) {
       d += analogRead(heatpin);
-      delay(5);
     }
-    d /= N;
+    d /= 3.0;
 
-    Serial.print("COARSE angle ");
-    Serial.print(i);
-    Serial.print("  reading = ");
-    Serial.println(d);
-
-    if (d < bestReading) {
+    if (d > 2 && d < bestReading) {
       bestReading = d;
       bestAngle   = i;
-    }
-    if (d > worstReading) {
-      worstReading = d;
-    }
-  }
-
-  // Check if fire actually stands out: "best" must be significantly lower
-  float contrast = worstReading - bestReading;  // bigger = more obvious fire
-  Serial.print("Best coarse reading = ");
-  Serial.println(bestReading);
-  Serial.print("Worst coarse reading = ");
-  Serial.println(worstReading);
-  Serial.print("Contrast = ");
-  Serial.println(contrast);
-
-  // If there is no clear hot spot, skip movement this cycle
-  const float MIN_CONTRAST = 40.0;  // tune experimentally
-  if (contrast < MIN_CONTRAST || bestReading > FIRE_THRESHOLD) {
-    Serial.println("No strong fire detected in coarse scan.");
-    return bestReading;
-  }
-
-  // --------- Fine scan around best coarse angle ----------
-  int fineStart = max(0,   bestAngle - 15);
-  int fineEnd   = min(180, bestAngle + 15);
-
-  float bestReadingFine = bestReading;
-  int   bestAngleFine   = bestAngle;
-
-  for (int i = fineStart; i <= fineEnd; i += 3) {
-    scanningServo.write(i);
-    delay(150);
-
-    float d = 0;
-    const int N2 = 7;
-    for (int k = 0; k < N2; k++) {
-      d += analogRead(heatpin);
-      delay(5);
-    }
-    d /= N2;
-
-    Serial.print("FINE angle ");
-    Serial.print(i);
-    Serial.print("  reading = ");
-    Serial.println(d);
-
-    // still minimizing reading (lower = closer)
-    if (d < bestReadingFine) {
-      bestReadingFine = d;
-      bestAngleFine   = i;
     }
   }
 
   Serial.print("BEST ANGLE = ");
-  Serial.println(bestAngleFine);
-  Serial.print("BEST READING = ");
-  Serial.println(bestReadingFine);
+  Serial.println(bestAngle);
+  Serial.print("HEAT READING = ");
+  Serial.println(bestReading);
+}
 
-  // --------- Turn toward that best angle ----------
-  int angleOffset = 90 - bestAngleFine;   // 90° is "straight ahead"
+// Chasing Fire (SO brave of FRED)
+void ChaseFire(int bestAngle, float bestReading) {
+  // turn toward it
+  int angleOffset = 90 - bestAngle;  // 90° is "straight ahead"
 
+  // positive offset = right
+  // negative offset = left
   Speed = 80;
-  if (angleOffset > 8) {
+  if (angleOffset > -8) {
     MotorControl('R');
     delay(abs(angleOffset) * 4);
     Serial.println("Turning Right");
-  } else if (angleOffset < -8) {
+  } else if (angleOffset < 8) {
     MotorControl('L');
     delay(abs(angleOffset) * 4);
     Serial.println("Turning Left");
   }
   MotorControl('K');
 
-  // --------- Move forward a shorter step ----------
-  Speed = 140;     // slower than 180 for better control
+  // now drive forward a bit
+  Speed = 180;
   MotorControl('F');
-  delay(350);      // smaller hop so you can re-scan often
+  delay(600);
   MotorControl('K');
-
-  // Return bestReading (lower = closer / hotter)
-  return bestReadingFine;
 }
-
 
 // Aim FRED at the fire (keep turning until roughly centered at 90°)
 void aimFred() {
   bool centered = false;
 
-  while (!centered) {   // FIX: comparison, not assignment
-    float bestReading = 1023.0;
-    int   bestAngle   = 90;
+  while (!centered) {
+    float closestDist = 9999;
+    int bestAngle = 90;
 
-    // single scan, tighter step for aiming
-    for (int i = 0; i <= 180; i += 10) {
+    // scan entire arc
+    for (int i = 0; i <= 180; i += 15) {
       scanningServo.write(i);
       if (i == 0) {
         delay(500);
       }
-      delay(150);
+      delay(200);
 
       float d = 0;
-      const int N = 7;
-      for (int k = 0; k < N; k++) {
+      for (int k = 0; k < 3; k++) {
         d += analogRead(heatpin);
-        delay(5);
       }
-      d /= N;
+      d /= 3.0;
 
-      if (d < bestReading) {
-        bestReading = d;
-        bestAngle   = i;
+      if (d > 2 && d < closestDist) {
+        closestDist = d;
+        bestAngle = i;
       }
     }
 
-    int angleOffset = 90 - bestAngle;
-
-    Serial.print("AIM bestAngle = ");
+    Serial.print("AIM BEST ANGLE = ");
     Serial.println(bestAngle);
-    Serial.print("AIM angleOffset = ");
-    Serial.println(angleOffset);
+    Serial.print("AIM HEAT READING = ");
+    Serial.println(closestDist);
 
-    // close enough to "straight ahead"?
-    if (abs(angleOffset) <= 5) {
+    int angleOffset = 90 - bestAngle;  // 90° is straight ahead
+
+    // If we're already roughly centered, stop
+    if (abs(angleOffset) <= 15) {
       centered = true;
       MotorControl('K');
-      Serial.println("AIM: centered on fire.");
+      Serial.println("Centered on fire.");
       break;
     }
 
-    Speed = 70;
-    if (angleOffset > 0) {
+    // Otherwise, turn toward it
+    Speed = 80;
+    if (angleOffset > 15) {
       MotorControl('R');
       delay(abs(angleOffset) * 4);
       Serial.println("AIM: Right");
-    } else {
+    } 
+    if (angleOffset < -15){
       MotorControl('L');
       delay(abs(angleOffset) * 4);
       Serial.println("AIM: Left");
@@ -318,41 +270,27 @@ void aimFred() {
   }
 }
 
+// When should FRED put out the fire?
 void ThinkFREDThink() {
-  // -------- QUICK EXIT OPTION --------
-  // Take a small average of the IR reading
-  float quick = 0;
-  const int Nq = 5;
-  for (int i = 0; i < Nq; i++) {
-    quick += analogRead(heatpin);
-    delay(5);
-  }
-  quick /= Nq;
+  int bestAngle;
+  float bestHeat;
 
-  Serial.print("Quick IR check = ");
-  Serial.println(quick);
+  scanForFire(bestAngle, bestHeat);
 
-  // If IR is very low (very hot / very close), skip the chase
-  if (quick < 30) {
-    Serial.println("Very close fire detected (quick check) -> AIM + SPRAY");
+  Serial.print("Heat Reading = ");
+  Serial.println(bestHeat);
+
+  // Only spray if we have a valid reading and are close enough
+  if (bestHeat > 0 && bestHeat < sprayHeat) {
+    Serial.println("Close enough: aiming and spraying...");
     aimFred();
     spray();
+    delay(200);
     AXEIT();
-    return;   // exit early, no chasing this cycle
-  }
-  // -----------------------------------
-
-  // -------- NORMAL BEHAVIOR YOU ALREADY HAD --------
-  float dist = ChaseFire();        // your existing chase logic
-
-  if (dist < spraydist) {          // your existing condition
-    Serial.println("ChaseFire says we are close enough -> AIM + SPRAY");
-    aimFred();
-    spray();
-    AXEIT();
+  } else {
+    ChaseFire(bestAngle, bestHeat);
   }
 }
-
 
 bool autoMode = false;
 
@@ -363,10 +301,9 @@ void loop() {
     IrReceiver.resume();
 
     if (c == 'U') {          // forward arrow
-      autoMode = true;
-      hasSprayed = false;    // new mission
+      autoMode = true;       // enable autonomous mode
       Serial.println("AUTO MODE ON");
-}
+    }
     if (c == '/') {          // kill button
       autoMode = false;      // disable autonomous mode
       MotorControl('K');
