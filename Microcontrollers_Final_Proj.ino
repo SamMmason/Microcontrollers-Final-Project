@@ -13,13 +13,13 @@ const int ReadPin = 3;
 const int echoPin = 13;
 const int trigPin = 12;
 const int servoPin = 9;
-const int heatpin = A2;
-const int pumpin = 10;
-const int axe = A1;         
-const int sprayHeat = 150;    // In whatever the IR sensor reads
+const int pumpin = 11;
+const int axe = A1;    
+const int heatpin = A2;     
+const int sprayHeat = 250;    //0-1023 Reading from IR sensor
 
 // Changes throughout code
-int Speed = 90;
+int Speed = 80;
 
 const unsigned long Forward = 0xB946FF00;
 const unsigned long Kill    = 0xBF40FF00;
@@ -60,26 +60,16 @@ float ultrasonic_read() {
 
 // FRED likes to spread the ashes when he's finished putting the fire out (just to be safe)
 void AXEIT() {
+
   float read = ultrasonic_read();
   if (read < 20){
-
-    AXEServo.write(180);
-    delay(1500);
-    AXEServo.write(80);
-    delay(1500);
-    AXEServo.write(180);
-    delay(1500);
-
     MotorControl('R');
-    delay(500);
-    MotorControl('L');
-    delay(500);
-    MotorControl('R');
-    delay(500);
-    MotorControl('L');
-    delay(500);
+    delay(175);
     MotorControl('K');
+    delay(300);
 
+    AXEServo.write(180);
+    delay(1500);
     AXEServo.write(80);
     delay(1500);
     AXEServo.write(180);
@@ -141,21 +131,21 @@ void spray() {
   AXEServo.write(180);
   delay(1500);
   digitalWrite(pumpin, HIGH);
-  delay(5000);
+  delay(3000);
   digitalWrite(pumpin, LOW);
-  delay(500);
+  delay(1500);
   AXEServo.write(80);
   delay(1500);
 }
 
 // Scan for fire: find angle of maximum heat reading
 void scanForFire(int &bestAngle, float &bestReading) {
-  bestReading = 9999;      // "no fire yet"
+  bestReading = 9999;      // High number so that readings will be lower
   bestAngle   = 90;        // default straight ahead
 
   float d;
 
-  // scan entire arc 0° → 180° in 15° steps
+  // scan entire arc in 15deg steps
   for (int i = 0; i <= 180; i += 15) {
     scanningServo.write(i);
 
@@ -207,7 +197,7 @@ void ChaseFire(int bestAngle, float bestReading) {
   // now drive forward a bit
   Speed = 180;
   MotorControl('F');
-  delay(600);
+  delay(450);
   MotorControl('K');
 }
 
